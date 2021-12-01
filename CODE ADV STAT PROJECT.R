@@ -1,0 +1,178 @@
+#Libraries
+library(dplyr)
+library(ggplot2)
+library(readr)
+library(tidyverse)
+library(magrittr)
+library(MASS)
+library(corrplot)
+#Dataset
+dataset = read.csv("student-por.csv", sep = ";", header = TRUE)
+dataset %<>% mutate(across(where(is.character), as.factor))
+
+###Setting up target variable and predictors
+Y = dataset$G3
+X = dataset[,-c(31,32,33)]
+
+########Exploratory data analysis######
+
+#Frequency of school
+barplot(table(dataset$school),
+        xlab = "School",
+        ylab = "Frequency")
+
+#Frequency of study time
+ggplot(dataset, aes(studytime)) + 
+  geom_histogram(binwidth = .25, color = "black", 
+                 fill = "purple") + 
+  xlab("Study time") +
+  ylab("Frequency")
+
+#Frequency of failures
+ggplot(dataset, aes(failures)) + 
+  geom_histogram(binwidth = .25, color = "black", 
+                 fill = "yellow") + 
+  xlab("Number of failures") +
+  ylab("Frequency")
+
+#Frequency of reason
+barplot(table(dataset$reason),
+        xlab = "Reason",
+        ylab = "Frequency", col = "green")
+
+#Frequency of absences
+boxplot(dataset$absences, main = "Boxplot of absences",col = "blue")
+summary(dataset$absences)
+
+#CONTINGENCY TABLES
+prop.table(table(dataset$school,dataset$studytime), 1 )
+prop.table(table(dataset$sex,dataset$failures), 1 )
+prop.table(table(dataset$higher,dataset$sex), 1 )
+prop.table(table(dataset$Medu,dataset$Fedu), 1 )
+
+#Independence test
+chisq.test(table(dataset$higher,dataset$sex)) 
+
+#correlation between numeric variables
+num_variables = select_if(X, is.numeric)
+
+correlations <- cor(num_variables, method = "spearman")
+correlations
+
+corrplot(correlations, type = "upper", order = "hclust",
+         tl.col = "black", tl.srt = 45, method = "number")
+
+
+
+# Does it look like a Poisson?
+
+mean(Y)
+var(Y)
+
+
+#Comparison
+par(mfrow = c(1,2))
+
+barplot(prop.table(table(dataset$G3)),
+        ylim = c(0,.15),
+        xlab = "Final Grades",
+        main = "Y probability distribution",
+        col = "blue")
+
+prob <- dpois(dataset$G3, mean(dataset$G3))#sample mean of our data
+prob
+
+plot(dataset$G3, prob, pch = 16, col = "orange", 
+     type = "h",
+     ylim = c(0,.15),
+     xlab = "Final Grades", 
+     main = "Theoretical Distribution")
+points(dataset$G3, prob, pch = 16, col = "orange", type = "p")
+
+par(mfrow = c(1,1))
+
+#####POISSON REGRESSION MODEL
+
+mod = glm(Y ~ ., data=X, family=poisson)
+summary(mod)
+
+best_mod = step(glm(Y ~ ., data=X, family=poisson))
+summary(best_mod)
+
+best_mod_improved = glm(formula = Y ~ school + Fedu + studytime + failures + 
+                          schoolsup + higher + Dalc, family = poisson, data = X)
+
+summary(best_mod_improved)
+exp((best_mod_improved$coefficients))
+
+#residuals analysis
+resid <- resid(best_mod_improved, type = "pearson")
+fitted <- fitted(best_mod_improved)
+hist(resid)
+plot(best_mod_improved, which = 1) # Pearson residuals
+
+#PREDICTION
+set.seed(23)
+tr = sample(nrow(X), nrow(X)*0.8)
+
+train_model <- glm(Y[tr] ~ school + Fedu + studytime + failures + 
+                     schoolsup + higher + Dalc, 
+                   family = poisson, 
+                   data = X[tr,])
+
+summary(train_model)
+
+#RMSE on the train set
+sqrt(mean((Y[tr] - train_model$fitted.values)^2))
+
+pred <- predict(train_model, newdata = X[-tr,], type = "response")
+
+# RMSE on the test set
+sqrt(mean((Y[-tr] - pred)^2))
+
+
+#BENCHMARK REGRESSION
+train_model_bench = glm(Y[tr] ~ 1, data = X, family = "poisson")
+summary(train_model_bench)
+
+#RMSE on the benchmark train set
+sqrt(mean((Y[tr] - train_model_bench$fitted.values)^2))
+
+pred_bench <- predict(train_model_bench, newdata = X[-tr,], type = "response")
+
+# RMSE on the benchmark test set
+sqrt(mean((Y[-tr] - pred_bench)^2))
+
+
+#############Regression with G1 and G2###########
+
+Y1 = dataset$G3
+X1 = dataset[,-c(33)]
+
+mod_tot <- glm(Y1~., data = X1, family = poisson )
+summary(mod_tot)
+
+mod_aic <- stepAIC(mod_tot)
+summary(mod_aic)
+
+mod_aic_improved <- glm(Y1 ~ G2, 
+                        family = poisson, data = X1)
+summary(mod_aic_improved)
+exp(coefficients(mod_aic_improved))
+
+#PREDICTION
+set.seed(23)
+tr = sample(nrow(X1), nrow(X1)*0.8)
+
+train_model <- glm(Y1[tr] ~ G2, 
+                     family = poisson, data = X1[tr,])
+summary(train_model)
+
+#RMSE on the train set
+sqrt(mean((Y1[tr] - train_model$fitted.values)^2))
+
+pred <- predict(train_model, newdata = X1[-tr,], type = "response")
+
+# RMSE on the test set
+sqrt(mean((Y1[-tr] - pred)^2))
+

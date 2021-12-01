@@ -1,0 +1,397 @@
+---
+title: "ADVANCED STATISTICS PROJECT"
+author: 'Team: Fabiana Caccavale, Marco Amadori, Bruno Lenderink, Lisa Aita'
+output: html_document
+subtitle: Using Poisson regression to predict secondary school students' performance
+---
+
+```{r, include= FALSE}
+#Libraries
+library(dplyr)
+library(readr)
+library(tidyverse)
+library(magrittr)
+library(MASS)
+library(ggplot2)
+
+dataset = read.csv("student-por.csv", sep = ";", header = TRUE)
+dataset %<>% mutate(across(where(is.character), as.factor))
+
+Y = dataset$G3
+X = dataset[,-c(31,32,33)]
+
+```
+
+The dataset used to conduct the analysis, and the reference paper "Using data mining to predict secondary school stutents' performance" by Paulo Cortez and Alice Silva, can be found at: https://github.com/MarcoAmadori1/PORTOGUESE-PROJECT.git
+
+## Introduction
+
+The present work intends to build a model which can effectively predict the students' final grade in the Portuguese subject.
+
+Modeling students' performance is an important tool for both educators and students, since it can help a better understanding of this phenomenon and ultimately improve it.
+
+## Variables Description
+```{r tab, echo=FALSE, fig.cap= "Table 1. Variable description", message=FALSE, warnings=FALSE, results='asis' }
+tab <- "
+| Attribute       | Description (Domain)        | 
+| ------------- |:-------------| 
+| sex      | student's sex (binary; female or male)| 
+| age      | student's age (numeric: form 15 to 22)      |   
+| school   | student's school (binary: Gabriel Pereira(GP) or Mousinho da Silveira(MS)      | 
+| address  | student's home address type (binary: urban or rural) |
+| Pstatus  | parent's cohabitation status (binary: living together or apart) |
+| Medu     | mother’s education (numeric: from 0 to 4a) |
+| Mjob     | mother’s job (nominal[b]) |
+| Fedu     | father’s education (numeric: from 0 to 4a) |
+| Fjob     | father’s job (nominal [b]) |
+| guardian | student’s guardian (nominal: mother, father or other) |
+| famsize  | family size (binary: ≤ 3 or > 3) |
+| famrel | quality of family relationships (numeric: from 1 – very bad to 5 – excellent) |
+| reason | reason to choose this school (nominal: close to home, school reputation, course preference or other) |
+| traveltime | home to school travel time (numeric: 1 – < 15 min., 2 – 15 to 30 min., 3 – 30 min. to 1 hour or 4 – > 1 hour) |
+| studytime | weekly study time (numeric: 1 – < 2 hours, 2 – 2 to 5 hours, 3 – 5 to 10 hours or 4 – > 10 hours) |
+| failures | number of past class failures (numeric: n if 1 ≤ n < 3, else 4) |
+| schoolsup | extra educational school support (binary: yes or no) |
+| famsup | family educational support (binary: yes or no)|
+| activities | extra-curricular activities (binary: yes or no) |
+| paidclass | extra paid classes (binary: yes or no) |
+| internet | Internet access at home (binary: yes or no) |
+| nursery | attended nursery school (binary: yes or no) |
+| higher | wants to take higher education (binary: yes or no) |
+| romantic | with a romantic relationship (binary: yes or no) |
+| freetime | free time after school (numeric: from 1 – very low to 5 – very high)|
+| goout | going out with friends (numeric: from 1 – very low to 5 – very high)|
+| Walc | weekend alcohol consumption (numeric: from 1 – very low to 5 – very high)|
+| Dalc | workday alcohol consumption (numeric: from 1 – very low to 5 – very high)|
+| health | current health status (numeric: from 1 – very bad to 5 – very good) |
+| absences | number of school absences (numeric: from 0 to 93) |
+| G1 | first period grade (numeric: from 0 to 20) |
+| G2 | second period grade (numeric: from 0 to 20) |
+| G3 | final grade (numeric: from 0 to 20) |
+
+"
+cat(tab)
+```
+
+## Exploratory Data Analysis
+
+Conducting a preliminary exploration of the data can be useful to better understand the context of inquiry and ease the modeling process.
+
+To begin with, given the fact that the dataset is composed by students coming from two different schools, the following barplot shows the different frequencies. The frequency detected in the GP school corresponds to 423 students, while in the MS school corresponds to 226 students.
+
+```{r, echo = FALSE}
+barplot(table(dataset$school),
+        xlab = "School",
+        ylab = "Frequency")
+```
+
+In the next barplot it is investigated how the students can be divided on the basis of the hours of study. What emerges is that the highest frequency of students study two hours, while the lowest number study four hours.
+
+```{r, echo = FALSE}
+ggplot(dataset, aes(studytime)) + 
+  geom_histogram(binwidth = .25, color = "black", 
+                 fill = "purple") + 
+  xlab("Study time") +
+  ylab("Frequency")
+```
+
+Moreover, the following barplot helps understand the frequency of failures among the students. The vast majority accounts for zero failures, followed by one failure. Only few of the students have failed 2 or 3 times in the past.
+
+```{r, echo=FALSE}
+ggplot(dataset, aes(failures)) + 
+  geom_histogram(binwidth = .25, color = "black", 
+                 fill = "yellow") + 
+  xlab("Number of failures") +
+  ylab("Frequency")
+```
+
+From the exploratory data analysis, it is also possible to see that the majority of students chooses the school based on the course. It is then possible to calculate the relative percentages of the choices and the results are that the 44% of the students has chosen the school based on the course offered, 23% based on the proximity to home, 22% for the reputation, and the remaining 11% for non specified reasons.
+
+```{r, echo=FALSE}
+barplot(table(dataset$reason),
+        xlab = "Reason",
+        ylab = "Frequency", col = "green")
+```
+
+Lastly, through the absences boxplot, it can be clearly seen that there are some outliers, the maximum observation being 32 and it is possible to observe that the interquartile range of the values related to absences lies in the interval between 0 and 6. The median value for absences is, in fact, equal to two.
+
+
+```{r, echo=FALSE}
+boxplot(dataset$absences, main = "Boxplot of absences",col = "blue")
+```
+        
+## Contingency tables
+
+To better understand the relationship between the dataset’s predictors, it is useful to inspect the conditional probabilities.
+
+
+```{r, echo=FALSE}
+knitr::kable((prop.table(table(dataset$school,dataset$studytime), 1 )),
+             caption = " Table 2. School vs Studytime")
+```
+
+```{r, echo=FALSE}
+knitr::kable((prop.table(table(dataset$sex,dataset$failures), 1 )),
+              caption = "Table 3. Sex vs Failures")
+```
+```{r, echo=FALSE}
+knitr::kable((prop.table(table(dataset$higher,dataset$sex), 1 )),
+              caption = "Table 4. Higher vs Sex")
+```
+```{r, echo=FALSE}
+knitr:: kable((prop.table(table(dataset$Medu,dataset$Fedu), 1 )),
+               caption = "Table 5. Medu vs Fedu")
+```
+
+## Contingency tables interpretation:
+
+
+•	From the first contingency table it is possible to understand that the probability to find a student studying one hour in the MS school is of 41%, while in the School GP is 28%. For higher number of hours studied, the probability to find student studying more than one hour is slightly but consistently higher in the latter school.
+
+•	Concerning the relation between the sex and the number of failures, it is found that there is no significant correlation among the two conditions.
+
+•	An important result has been found in the relation between the student's sex and whether he/she wants to continue his/her academic career, in fact the probability of finding a female who wants to take higher education is 60% while for a male is 40%. 
+However, since these two are categorical variables, it is possible to perform a chi-squared test whose result suggests that the variables are independent.
+
+•	Another interesting result has been found inspecting the relationship of the level of education of the parents. It is in fact more probable to find two parents with the same level of education looking at educational levels higher than zero, in the latter case it doesn’t apply. 
+The probability of finding two parents both with the highest level of education (4) is 54%, with a level of education (3) the probability is 38%, with a level of education (2) is 54% and with a level of education (1) is 64%.
+
+## Correlation plot
+
+To further understand the correlation among the numerical predictors, a correlation plot can visually help. 
+
+```{r, echo=FALSE}
+num_variables = select_if(X, is.numeric)
+correlarions <- cor(num_variables, method = "spearman")
+```
+
+```{r, include=FALSE}
+library(corrplot)
+```
+
+```{r, echo=FALSE}
+corrplot(correlarions, type = "upper", order = "hclust",
+         tl.col = "black", tl.srt = 45, method = "number")
+```
+
+It can be noticed, for example, that the educational level of the student's father (Fedu) and the one of the mother (Medu) have a rather high correlation of 0.65, also noticed in the contingency table. In addition, the daily consumption of alcohol (Dalc) and the weekly one (Walc) are quite correlated.
+
+
+```{r, include=FALSE}
+
+mean(Y)
+var(Y)
+
+```
+
+## Probability distribution
+Since the target variable G3 (students’ final grade) is a count variable, it is expected to be distributed as a Poisson distribution.
+In order to check this assumption, a theoretical Poisson distribution having the same range (from 0 to 19) and λ of the target variable was compared with the actual distribution of the target variable.
+
+```{r, include=FALSE}
+prob <- dpois(dataset$G3, mean(dataset$G3))#sample mean of our data
+```
+
+```{r, echo=FALSE}
+par(mfrow = c(1,2))
+
+barplot(prop.table(table(dataset$G3)),
+        ylim = c(0,.15),
+        xlab = "Final Grades",
+        main = "Y probability distribution",
+        col = "blue")
+
+prob <- dpois(dataset$G3, mean(dataset$G3))#sample mean of our data
+
+plot(dataset$G3, prob, pch = 16, col = "orange", 
+     type = "h",
+     ylim = c(0,.15),
+     xlab = "Final Grades", 
+     main = "Theoretical Distribution")
+points(dataset$G3, prob, pch = 16, col = "orange", type = "p")
+
+par(mfrow = c(1,1))
+```
+
+As it can be noticed from this comparison, the two distributions look quite similar except for the values of G3 equals to 0. The probability distribution of Y, as a matter of fact, has a higher number of zero values, which may be caused by typing errors in the collection of the data since, in their correspondence, the first and second periods' grades have values that differ from zero.
+
+In general, however, it can still be stated that the target variable G3 approximately follows a Poisson distribution.
+
+Additionally, if we compare the mean and the variance of Y, we find that the mean is equal to 11.9, while the variance is equal to 10.44. 
+Since the mean is higher than the variance, there is a situation of underdispersion.  The Poisson distribution condition, according to which the mean of Y should be equal to its variance is not exactly met. 
+
+
+## Regression model
+In order to estimate a model which can be useful to predict students’ final grade in the Portuguese subject, a generalized linear model was built. It is a generalization of ordinary linear regression that allows for response variables that have error distribution models other than a Gaussian distribution.
+
+To do that, the glm() function was used in R. 
+
+```{r, echo=FALSE}
+mod = glm(Y ~ ., data=X, family=poisson)
+summary(mod)
+```
+
+The model that is obtained using all predictors has several variables with a p-value > 0.05 and, therefore, not significant. 
+
+To improve the model, the step() function was used, which gives as a result the best model according to the Akaike Information Criterion.
+However, as it can be seen in the summary below, the model that is obtained has still some variables whose significance level and, consequently, their effects on the target variable, are not very relevant.
+```{r, include=FALSE}
+best_mod = step(glm(Y ~ ., data=X, family=poisson))
+```
+```{r, echo=FALSE}
+summary(best_mod)
+```
+
+Thus, the model is improved manually by removing these variables. They are: sex and health
+
+
+```{r, include=FALSE}
+best_mod_improved = glm(formula = Y ~ school + Fedu + studytime + failures + 
+                          schoolsup + higher + Dalc, family = poisson, data = X)
+```
+```{r, echo=FALSE}
+summary(best_mod_improved)
+```
+In this model the regression coefficients represent the expected change in the log of the mean per unit change in the predictors, keeping all other predictors fixed.
+
+In order to interpret them, the exponent of the coefficients should be taken.
+The obtained results are the following:
+```{r, echo=FALSE}
+exp((best_mod_improved$coefficients))
+```
+
+## Examples of interpretation
+Keeping fixed all other independent variables:
+
+•	A student attending the “MS” school, is expected to have a final grade 10.8% lower with respect to a student attending the “GP” school (baseline).
+
+•	One-unit increase of a student’s father education level (“Fedu”) leads to an increase of 2.2% of the average final grade.
+
+•	The number of hours of studytime impact the final grade positively, one additional hour of studying is expected to increase the average final grade by 4.4%. 
+
+•	The number of failures impact negatively the final grade, one additional failure is expected to reduce the average final grade by 14.2%. 
+
+•	A student who needs extra educational support (“schoolsupyes”), is expected to have a final grade 10.4% lower than a student without this need.
+
+•	A student who wants to take higher education (“higheryes”) is expected to have a final grade 19.9% higher than a students who do not want to continue his/her academic career.
+
+•	One-unit increase of a student’s daily alcohol intake decreases the average final grade by 4%.
+
+## Residuals analysis
+If the model correctly describes the variability of the data, then residuals are expected to be normally distributed and independent. 
+In order to determine the shape of the residuals’ distribution, the hist() function was used.
+
+```{r, include=FALSE}
+resid <- resid(best_mod_improved, type = "pearson")
+fitted <- fitted(best_mod_improved)
+
+```
+```{r, echo=FALSE}
+hist(resid, main = "Histogram of residuals")
+```
+
+It can be stated that the residuals approximately follow a Gaussian distribution. It is approximately zero-centred so on average the model will not do big mistakes, however the presence of outliers skewes the distribution, but their frequency is not significant. 
+
+Moreover, from the residuals plot(made considering the Pearson residuals, meaning that the residuals are divided by the square root of the variance) it is possible to see that residuals’ values do not have any obvious distinct pattern: residuals are reasonably well spread above and below a pretty horizontal line. 
+However, the left-side of the line does have fewer observations so slightly less variance there and as noticed before in the histogram, the presence of outliers is visible in the lower part of the graph.
+```{r, echo=FALSE}
+plot(best_mod_improved, which = 1) 
+```
+
+It is possible to deduce that the model is approximately correct.
+
+```{r  include=FALSE}
+set.seed(23)
+tr = sample(nrow(X), nrow(X)*0.8)
+
+train_model <- glm(Y[tr] ~ school + Fedu + studytime + failures + 
+                     schoolsup + higher + Dalc, 
+                   family = poisson, 
+                   data = X[tr,])
+
+summary(train_model)
+
+#RMSE on the train set
+sqrt(mean((Y[tr] - train_model$fitted.values)^2))
+
+pred <- predict(train_model, newdata = X[-tr,], type = "response")
+
+# RMSE on the test set
+sqrt(mean((Y[-tr] - pred)^2))
+
+
+#BENCHMARK REGRESSION
+train_model_bench = glm(Y[tr] ~ 1, data = X, family = "poisson")
+summary(train_model_bench)
+
+#RMSE on the benchmark train set
+sqrt(mean((Y[tr] - train_model_bench$fitted.values)^2))
+
+pred_bench <- predict(train_model_bench, newdata = X[-tr,], type = "response")
+
+# RMSE on the benchmark test set
+sqrt(mean((Y[-tr] - pred_bench)^2))
+```
+
+## Prediction
+In order to assess the predictive performance of the model, the dataset is split into train set and test set and the seed is set.
+In particular, the train set consists of the 80% of the entire dataset, while the test set embarks the remaining 20% of the data.
+The model built in the previous steps is applied to the train test.
+
+The measure that is used to quantify the error of the model in predicting quantitative data is the Root Mean Square Error (RMSE).
+
+The RMSE of the train set is 2.68.
+If we apply the same regression model to the test set, the resulting RMSE is 2.66.
+The RMSE values of the train and test sets are not very different. This implies that there are no obvious problems of overfitting or underfitting in the data.
+
+However, in order to state whether the value of the RMSE is good or not, it is needed to compare it with one of another model.
+
+In this study, the benchmark that is taken is the empty model (model with only the intercept). 
+Also in this case, the RMSE is computed for both the train and the test set. The same conclusion drawn from the comparison of the train and test sets’ RMSEs obtained using the estimated model, also holds here.
+
+The RMSE of the benchmark’s test set is then compared with the RMSE that results by applying the estimated model to the test set.
+The former is 3.09, the latter as stated before is 2.66.
+This means that if the values of Y are predicted by applying the estimated model, the predicted values are more accurate than the ones that result by applying the empty model, thus by only knowing the mean value of Y and without having any information about students.
+
+## Conclusions
+In conclusion, it is possible to state that the model that has been built through this study has a good predictive performance if compared to the one of the empty model. However, the difference between them is not remarkable.
+
+Additionally, if we include in the dataset the predictors that, according to the reference paper, should be the most significant (G1 and G2 – first and second periods’ grades) and estimate a new model, we find out that only the "G2" variable is significant according to the Akaike Information Criterion.
+The resulting test set’s RMSE is 1.59, which is lower than the one obtained with the proposed model of this study and, thus, it would be possible to obtain better predictions.
+
+```{r echo=FALSE, include=FALSE}
+#############Regression with G1 and G2###########
+
+Y1 = dataset$G3
+X1 = dataset[,-c(33)]
+
+mod_tot <- glm(Y1~., data = X1, family = poisson )
+summary(mod_tot)
+
+mod_aic <- stepAIC(mod_tot)
+summary(mod_aic)
+
+mod_aic_improved <- glm(Y1 ~ G2, 
+                        family = poisson, data = X1)
+summary(mod_aic_improved)
+exp(coefficients(mod_aic_improved))
+
+#PREDICTION
+set.seed(23)
+tr = sample(nrow(X1), nrow(X1)*0.8)
+
+train_model <- glm(Y1[tr] ~ G2, 
+                     family = poisson, data = X1[tr,])
+summary(train_model)
+
+#RMSE on the train set
+sqrt(mean((Y1[tr] - train_model$fitted.values)^2))
+
+pred <- predict(train_model, newdata = X1[-tr,], type = "response")
+
+# RMSE on the test set
+sqrt(mean((Y1[-tr] - pred)^2))
+
+
+```
+
